@@ -16,7 +16,7 @@
 
         #game-over { 
             display: none; 
-            background: rgba(20, 0, 0, 0.95); /* Fondo mucho más oscuro y rojizo */
+            background: rgba(20, 0, 0, 0.95);
             border: 20px solid #ff0000;
             box-sizing: border-box;
         }
@@ -110,9 +110,9 @@
         const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
         sunGroup.add(sunLight);
         scene.add(sunGroup);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 
-        // --- JUGADOR (CUBO) ---
+        // --- JUGADOR ---
         const player = new THREE.Mesh(
             new THREE.BoxGeometry(1.2, 1.2, 1.2),
             new THREE.MeshStandardMaterial({ color: 0x00ffcc, emissive: 0x00ffcc, emissiveIntensity: 0.4 })
@@ -120,15 +120,40 @@
         player.position.set(0, 5, 0);
         scene.add(player);
 
-        // --- VARIABLES ---
+        // --- VARIABLES DE JUEGO ---
         let score = 0, speed = 0.28, gameRunning = false, platformCount = 0;
         let velY = 0, gravity = -0.015, jumpsAvailable = 2;
-        let targetRotation = 0; // Para la animación tipo Geometry Dash
+        let targetRotation = 0;
         const keys = { w: false, a: false, s: false, d: false };
         const platforms = [], coins = [], clouds = [];
         let time = 0;
 
-        // --- FUNCIONES ---
+        // --- NUBES ---
+        function createCloud(zOffset = 0) {
+            const group = new THREE.Group();
+            const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, transparent: true, opacity: 0.9 });
+            
+            const blobs = 3 + Math.floor(Math.random() * 3);
+            for(let i = 0; i < blobs; i++) {
+                const size = 1.5 + Math.random() * 2;
+                const blob = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 8), cloudMat);
+                blob.position.set(i * 1.8, Math.random(), Math.random());
+                group.add(blob);
+            }
+            
+            group.position.set(
+                (Math.random() - 0.5) * 120, 
+                15 + Math.random() * 20, 
+                zOffset || -Math.random() * 150
+            );
+            group.userData.drift = 0.02 + Math.random() * 0.08;
+            scene.add(group);
+            clouds.push(group);
+        }
+
+        for(let i = 0; i < 15; i++) createCloud(-i * 15);
+
+        // --- PLATAFORMAS Y PINCHOS ---
         function createSpikes(parent) {
             const spikeGeo = new THREE.ConeGeometry(0.5, 1.8, 6);
             const spikeMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0x550000 });
@@ -151,6 +176,7 @@
             plat.position.set(isFirst ? 0 : (Math.random() - 0.5) * 20, 0, z);
             scene.add(plat);
             platforms.push(plat);
+            
             if (isSpike) createSpikes(plat);
             else if (!isFirst && Math.random() > 0.4) {
                 const coinGeo = new THREE.CylinderGeometry(0.7, 0.7, 0.2, 16);
@@ -164,16 +190,19 @@
 
         for(let i = 0; i < 12; i++) spawnPlatform(-i * 22, i === 0);
 
+        // --- INPUTS ---
         window.addEventListener('keydown', (e) => {
-            if (keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true;
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = true;
             if (e.code === 'Space' && gameRunning && jumpsAvailable > 0) {
                 velY = 0.35; 
                 jumpsAvailable--;
-                targetRotation -= Math.PI / 2; // Rota 90 grados por salto
+                targetRotation -= Math.PI / 2;
             }
         });
         window.addEventListener('keyup', (e) => {
-            if (keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false;
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = false;
         });
 
         window.startGame = () => {
@@ -182,53 +211,61 @@
             gameRunning = true;
         };
 
+        // --- BUCLE PRINCIPAL ---
         function animate() {
             requestAnimationFrame(animate);
             if (!gameRunning) return;
 
-            // Ciclo Día/Noche
+            // Ciclo Cielo
             time += 0.001;
             sunGroup.position.set(0, Math.sin(time) * 100, Math.cos(time) * 100 + player.position.z);
-            scene.background = new THREE.Color(0x87ceeb).lerp(new THREE.Color(0x050510), 1 - Math.max(0, Math.sin(time)));
+            const skyColor = new THREE.Color(0x87ceeb).lerp(new THREE.Color(0x050510), 1 - Math.max(0, Math.sin(time)));
+            scene.background = skyColor;
+            scene.fog.color = skyColor;
 
-            // Física y Animación de Rotación (Geometry Dash Style)
+            // Física Jugador
             velY += gravity;
             player.position.y += velY;
-            
-            // Suavizar la rotación hacia el objetivo
-            player.rotation.x = THREE.MathUtils.lerp(player.rotation.x, targetRotation, 0.1);
+            player.rotation.x = THREE.MathUtils.lerp(player.rotation.x, targetRotation, 0.15);
 
-            // Controles
             if (keys.w) player.position.z -= 0.25;
             if (keys.s) player.position.z += 0.25;
             if (keys.a) player.position.x -= 0.25;
             if (keys.d) player.position.x += 0.25;
 
+            // Animación Nubes
+            clouds.forEach(cloud => {
+                cloud.position.z += speed + cloud.userData.drift;
+                if (cloud.position.z > player.position.z + 30) {
+                    cloud.position.z = player.position.z - 150;
+                    cloud.position.x = (Math.random() - 0.5) * 120;
+                }
+            });
+
             // Monedas
-            coins.forEach((c, i) => {
+            for(let i = coins.length - 1; i >= 0; i--) {
+                const c = coins[i];
                 c.position.z += speed;
                 c.rotation.z += 0.05;
                 if (player.position.distanceTo(c.position) < 2) {
                     score += 3; document.getElementById('score').innerText = score;
                     scene.remove(c); coins.splice(i, 1);
+                } else if (c.position.z > player.position.z + 20) {
+                    scene.remove(c); coins.splice(i, 1);
                 }
-            });
+            }
 
-            // Plataformas
+            // Plataformas y Colisiones
             platforms.forEach(p => {
                 p.position.z += speed;
                 const dx = Math.abs(player.position.x - p.position.x);
                 const dz = Math.abs(player.position.z - p.position.z);
                 
                 if (dx < 4.5 && dz < 6.5 && player.position.y <= 1.1 && player.position.y > 0 && velY < 0) {
-                    if (p.children.length > 0) { // MUERTE POR PINCHOS
-                        gameRunning = false;
-                        document.getElementById('game-over').style.display = 'flex';
-                        document.getElementById('final-score').innerText = "Score: " + score;
-                        return;
+                    if (p.children.some(child => child.geometry.type === "ConeGeometry")) {
+                        gameOver();
                     }
                     player.position.y = 1.1; velY = 0; jumpsAvailable = 2;
-                    // Al tocar suelo, alineamos la rotación al ángulo recto más cercano
                     targetRotation = Math.round(player.rotation.x / (Math.PI/2)) * (Math.PI/2);
                 }
 
@@ -246,17 +283,26 @@
                 }
             });
 
-            if (player.position.y < -15) { // CAÍDA AL VACÍO
-                gameRunning = false;
-                document.getElementById('game-over').style.display = 'flex';
-                document.getElementById('final-score').innerText = "Score: " + score;
-            }
+            if (player.position.y < -15) gameOver();
 
             camera.position.lerp(new THREE.Vector3(player.position.x * 0.4, player.position.y + 8, player.position.z + 15), 0.1);
             camera.lookAt(player.position.x, player.position.y, player.position.z - 5);
             renderer.render(scene, camera);
         }
+
+        function gameOver() {
+            gameRunning = false;
+            document.getElementById('game-over').style.display = 'flex';
+            document.getElementById('final-score').innerText = "Score: " + score;
+        }
+
         animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
